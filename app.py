@@ -115,5 +115,5 @@ if __name__ == '__main__':
     print("\nSYSTEM: PerioGuard AI Enterprise Engine Running")
     print("SYNC: Real-time Sync Active")
     # Bind to 0.0.0.0 and use Render's dynamic port
-    port = int(os.environ.get("PORT", 5001))
+    port = int(os.environ.get("PORT", 10000))
     socketio.run(app, debug=True, host='0.0.0.0', port=port, allow_unsafe_werkzeug=True)
