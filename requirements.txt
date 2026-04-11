@@ -25,4 +25,4 @@ requests==2.32.3
 Pillow==10.4.0
 
 # Roboflow AI SDK
-inference-sdk==0.9.21
+inference-sdk==0.12.1
