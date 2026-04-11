@@ -66,11 +66,11 @@ def create_app():
     from ai_routes import ai_bp
     from admin_routes import admin_bp
 
-    app.register_blueprint(auth_bp,    url_prefix='/api/auth')
-    app.register_blueprint(doctor_bp,  url_prefix='/api/doctor')
-    app.register_blueprint(patient_bp, url_prefix='/api/patient')
-    app.register_blueprint(ai_bp,      url_prefix='/api/ai')
-    app.register_blueprint(admin_bp,   url_prefix='/api/admin')
+    app.register_blueprint(auth_bp,    url_prefix='/')
+    app.register_blueprint(doctor_bp,  url_prefix='/doctor')
+    app.register_blueprint(patient_bp, url_prefix='/patient')
+    app.register_blueprint(ai_bp,      url_prefix='/ai')
+    app.register_blueprint(admin_bp,   url_prefix='/admin')
 
     # ── Inline demo / health routes
     @app.route('/')
@@ -81,7 +81,7 @@ def create_app():
     def health():
         return jsonify({"status": "healthy"}), 200
 
-    @app.route('/api/analyze', methods=['POST'])
+    @app.route('/analyze', methods=['POST'])
     def analyze_demo():
         return jsonify({"result": "Healthy", "confidence": "92%"})
 
