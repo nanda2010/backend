@@ -81,46 +81,63 @@ def register():
 @auth_bp.route('/login', methods=['POST'])
 def login():
     data = request.get_json()
-    identifier = data.get('email') or data.get('patient_id')
+    # Support 'email' or 'username' or 'identifier' for flexibility
+    identifier = data.get('email') or data.get('username') or data.get('identifier') or data.get('patient_id')
     password = data.get('password')
-    required_role = data.get('role') # Role from the frontend (doctor vs patient)
+    required_role = data.get('role')
+
+    print(f"DEBUG: Login attempt for identifier: {identifier}, role: {required_role}")
 
     if not identifier or not password:
-        return jsonify({"error": "Credentials required"}), 400
+        return jsonify({"error": "Missing credentials. Email and password required."}), 400
 
-    # Find user
+    # Find user by email first
     user = User.query.filter_by(email=identifier).first()
+    
+    # Fallback: check if it's a patient_id
     if not user:
         p_profile = PatientProfile.query.filter_by(patient_id=identifier).first()
-        if p_profile: user = User.query.get(p_profile.user_id)
+        if p_profile:
+            user = User.query.get(p_profile.user_id)
+            print(f"DEBUG: Found user via patient_id mapping: {identifier}")
 
-    if user and bcrypt.check_password_hash(user.password, password):
-        # Role Isolation Check
-        if required_role and user.role != required_role:
-            return jsonify({"error": f"Role mismatch. Use the {user.role.capitalize()} Portal."}), 403
+    if user:
+        print(f"DEBUG: Found user {user.email}. Checking password...")
+        if bcrypt.check_password_hash(user.password, password):
+            # Role Isolation Check
+            if required_role and user.role != required_role:
+                print(f"DEBUG: Role mismatch. User is {user.role}, requested {required_role}")
+                return jsonify({"error": f"Role mismatch. You are registered as a {user.role}."}), 403
 
-        # Removed status block for Straight Access
-        # if user.status == 'pending_approval' or user.status == 'suspended': ...
+            token = generate_token(user.id, user.role, user.name)
+            
+            # Log audit entry
+            try:
+                log = AuditLog(user_id=user.id, action='LOGIN', details=f"Logged in as {user.role}")
+                db.session.add(log)
+                db.session.commit()
+            except Exception as e:
+                db.session.rollback()
+                print(f"DEBUG: Audit log failed: {e}")
 
-        token = generate_token(user.id, user.role, user.name)
-        
-        # Log entry
-        log = AuditLog(user_id=user.id, action='LOGIN', details=f"Logged in as {user.role}")
-        db.session.add(log)
-        db.session.commit()
+            print(f"DEBUG: Login successful for {user.email}")
+            return jsonify({
+                "message": "Login successful",
+                "token": token,
+                "user": {
+                    "id": user.id,
+                    "name": user.name,
+                    "email": user.email,
+                    "role": user.role,
+                    "patient_id": user.patient_profile.patient_id if user.role == 'patient' else None
+                }
+            }), 200
+        else:
+            print(f"DEBUG: Password verification failed for {user.email}")
+    else:
+        print(f"DEBUG: No user found for identifier: {identifier}")
 
-        return jsonify({
-            "token": token,
-            "user": {
-                "id": user.id,
-                "name": user.name,
-                "email": user.email,
-                "role": user.role,
-                "patient_id": user.patient_profile.patient_id if user.role == 'patient' else None
-            }
-        }), 200
-
-    return jsonify({"error": "Invalid credentials"}), 401
+    return jsonify({"error": "Invalid email/ID or password"}), 401
 
 @auth_bp.route('/check', methods=['GET'])
 def check_status():
@@ -136,4 +153,5 @@ def get_profile(current_user):
         "role": current_user.role,
         "patient_id": current_user.patient_profile.patient_id if current_user.role == 'patient' else None
     }), 200
+
 
