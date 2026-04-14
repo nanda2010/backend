@@ -47,10 +47,15 @@ def create_app():
     db.init_app(app)
     bcrypt.init_app(app)
 
-    # ── CORS — CRITICAL: browsers reject wildcard origins with credentials
-    # Must use the exact Netlify domain, not "*"
+    # ── CORS — CRITICAL: must list every exact origin that calls the API
     CORS(app,
-         origins=["https://perioguardai.netlify.app", "http://localhost:3000", "http://127.0.0.1:5500"],
+         origins=[
+             "https://brilliant-biscuit-980ef9.netlify.app",  # ← actual Netlify URL
+             "https://perioguardai.netlify.app",               # ← custom domain (keep both)
+             "http://localhost:3000",
+             "http://localhost:5500",
+             "http://127.0.0.1:5500",
+         ],
          supports_credentials=True,
          allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
          methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
@@ -58,7 +63,12 @@ def create_app():
     # ── SocketIO with eventlet (required for Gunicorn -k eventlet)
     socketio = SocketIO(
         app,
-        cors_allowed_origins=["https://perioguardai.netlify.app", "http://localhost:3000", "http://127.0.0.1:5500"],
+        cors_allowed_origins=[
+            "https://brilliant-biscuit-980ef9.netlify.app",
+            "https://perioguardai.netlify.app",
+            "http://localhost:3000",
+            "http://127.0.0.1:5500",
+        ],
         async_mode='eventlet',
         logger=False,
         engineio_logger=False
