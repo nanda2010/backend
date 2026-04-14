@@ -47,13 +47,18 @@ def create_app():
     db.init_app(app)
     bcrypt.init_app(app)
 
-    # ── CORS – allow all origins for API cross-origin access
-    CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+    # ── CORS — CRITICAL: browsers reject wildcard origins with credentials
+    # Must use the exact Netlify domain, not "*"
+    CORS(app,
+         origins=["https://perioguardai.netlify.app", "http://localhost:3000", "http://127.0.0.1:5500"],
+         supports_credentials=True,
+         allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
+         methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
 
     # ── SocketIO with eventlet (required for Gunicorn -k eventlet)
     socketio = SocketIO(
         app,
-        cors_allowed_origins="*",
+        cors_allowed_origins=["https://perioguardai.netlify.app", "http://localhost:3000", "http://127.0.0.1:5500"],
         async_mode='eventlet',
         logger=False,
         engineio_logger=False
@@ -91,8 +96,7 @@ def create_app():
 
     @app.before_request
     def log_request_info():
-        if request.path.startswith('/api/'):
-            logger.info("API %s %s", request.method, request.path)
+        logger.info("%s %s", request.method, request.path)
 
     # ── WebSocket handlers
     from models import ChatMessage
