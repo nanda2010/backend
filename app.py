@@ -2,27 +2,43 @@ import os
 import sys
 import logging
 
-# ── Path Fix: Ensure the backend directory is always on sys.path,
-#    regardless of the CWD Gunicorn / Render sets at runtime.
+# ── Path Fix: Ensure the backend directory is always on sys.path
 BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 
-# ── Eventlet monkey-patch MUST happen before any other imports
+# ── Eventlet monkey-patch MUST be first
 import eventlet
 eventlet.monkey_patch()
 
-# ── Setup Logging
+# ── Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-from flask import Flask, send_from_directory, jsonify, request
-from flask_sqlalchemy import SQLAlchemy
-from flask_cors import CORS
+from flask import Flask, send_from_directory, jsonify, request, make_response
 from flask_socketio import SocketIO, emit, join_room
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# ── Allowed origins for CORS
+ALLOWED_ORIGINS = [
+    "https://brilliant-biscuit-980ef9.netlify.app",
+    "https://perioguardai.netlify.app",
+    "http://localhost:3000",
+    "http://localhost:5500",
+    "http://127.0.0.1:5500",
+]
+
+
+def _cors_headers(response, origin):
+    """Inject CORS headers into a response for an allowed origin."""
+    response.headers["Access-Control-Allow-Origin"]      = origin
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    response.headers["Access-Control-Allow-Methods"]     = "GET, POST, PUT, DELETE, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"]     = "Content-Type, Authorization, X-Requested-With"
+    response.headers["Access-Control-Max-Age"]           = "86400"
+    return response
 
 
 def create_app():
@@ -32,14 +48,13 @@ def create_app():
     db_path = os.path.join(BACKEND_DIR, 'perioguard.db')
     database_url = os.getenv('DATABASE_URL', f"sqlite:///{db_path}")
 
-    # Render's Postgres URLs start with "postgres://" — SQLAlchemy needs "postgresql://"
     if database_url.startswith("postgres://"):
         database_url = database_url.replace("postgres://", "postgresql://", 1)
 
-    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+    app.config['SQLALCHEMY_DATABASE_URI']   = database_url
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-    app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'perioguard-titanium-secret-2026')
-    app.config['UPLOAD_FOLDER'] = os.path.join(BACKEND_DIR, 'uploads')
+    app.config['SECRET_KEY']                = os.getenv('SECRET_KEY', 'perioguard-titanium-secret-2026')
+    app.config['UPLOAD_FOLDER']             = os.path.join(BACKEND_DIR, 'uploads')
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
     # ── Extensions
@@ -47,39 +62,21 @@ def create_app():
     db.init_app(app)
     bcrypt.init_app(app)
 
-    # ── CORS — CRITICAL: must list every exact origin that calls the API
-    CORS(app,
-         origins=[
-             "https://brilliant-biscuit-980ef9.netlify.app",  # ← actual Netlify URL
-             "https://perioguardai.netlify.app",               # ← custom domain (keep both)
-             "http://localhost:3000",
-             "http://localhost:5500",
-             "http://127.0.0.1:5500",
-         ],
-         supports_credentials=True,
-         allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
-         methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
-
-    # ── SocketIO with eventlet (required for Gunicorn -k eventlet)
+    # ── SocketIO
     socketio = SocketIO(
         app,
-        cors_allowed_origins=[
-            "https://brilliant-biscuit-980ef9.netlify.app",
-            "https://perioguardai.netlify.app",
-            "http://localhost:3000",
-            "http://127.0.0.1:5500",
-        ],
+        cors_allowed_origins=ALLOWED_ORIGINS,
         async_mode='eventlet',
         logger=False,
         engineio_logger=False
     )
 
-    # ── Import and register Blueprints INSIDE create_app (avoids circular imports)
-    from auth_routes import auth_bp
-    from doctor_routes import doctor_bp
+    # ── Blueprints
+    from auth_routes    import auth_bp
+    from doctor_routes  import doctor_bp
     from patient_routes import patient_bp
-    from ai_routes import ai_bp
-    from admin_routes import admin_bp
+    from ai_routes      import ai_bp
+    from admin_routes   import admin_bp
 
     app.register_blueprint(auth_bp,    url_prefix='/')
     app.register_blueprint(doctor_bp,  url_prefix='/doctor')
@@ -87,7 +84,29 @@ def create_app():
     app.register_blueprint(ai_bp,      url_prefix='/ai')
     app.register_blueprint(admin_bp,   url_prefix='/admin')
 
-    # ── Inline demo / health routes
+    # ══════════════════════════════════════
+    #  CORS — Manual bulletproof approach
+    #  Handles both preflight and real requests
+    # ══════════════════════════════════════
+
+    @app.after_request
+    def apply_cors(response):
+        origin = request.headers.get("Origin", "")
+        if origin in ALLOWED_ORIGINS:
+            _cors_headers(response, origin)
+        return response
+
+    # Explicit OPTIONS handler — catches ALL preflight requests
+    @app.route("/", methods=["OPTIONS"])
+    @app.route("/<path:path>", methods=["OPTIONS"])
+    def handle_options(path=""):
+        origin = request.headers.get("Origin", "")
+        resp = make_response("", 204)
+        if origin in ALLOWED_ORIGINS:
+            _cors_headers(resp, origin)
+        return resp
+
+    # ── Health / Demo routes
     @app.route('/')
     def home():
         return jsonify({"status": "online", "service": "PerioGuard AI Backend ✅"})
@@ -106,7 +125,9 @@ def create_app():
 
     @app.before_request
     def log_request_info():
-        logger.info("%s %s", request.method, request.path)
+        logger.info("%s %s [origin: %s]",
+                    request.method, request.path,
+                    request.headers.get("Origin", "-"))
 
     # ── WebSocket handlers
     from models import ChatMessage
@@ -142,7 +163,6 @@ def create_app():
     with app.app_context():
         from models import db as _db, User
         _db.create_all()
-        # Auto-activate all users (straight-access mode)
         try:
             User.query.update({User.status: 'active'})
             _db.session.commit()
@@ -155,7 +175,7 @@ def create_app():
     return app, socketio
 
 
-# ── Expose module-level `app` and `socketio` for Gunicorn (`gunicorn app:app`)
+# ── Expose for Gunicorn: `gunicorn app:app`
 app, socketio = create_app()
 
 if __name__ == '__main__':
